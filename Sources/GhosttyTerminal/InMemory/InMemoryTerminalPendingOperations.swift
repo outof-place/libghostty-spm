@@ -8,7 +8,8 @@ import Foundation
 /// count spares the detached cap a rescan of the queue on every write.
 struct InMemoryTerminalPendingOperations {
     enum Operation {
-        case write(Data)
+        /// `replay`: parse without answering terminal queries (history the host already answered).
+        case write(Data, replay: Bool)
         case processExit(exitCode: UInt32, runtimeMilliseconds: UInt64)
     }
 
@@ -34,7 +35,7 @@ struct InMemoryTerminalPendingOperations {
     }
 
     mutating func append(_ operation: Operation) {
-        if case let .write(data) = operation {
+        if case let .write(data, _) = operation {
             writeByteCount += data.count
         }
         appendedSequence += 1
@@ -42,18 +43,19 @@ struct InMemoryTerminalPendingOperations {
         count += 1
     }
 
-    /// Appends to the newest entry when it is a write, so a detached flood
-    /// stays one entry. The slot is cleared first so the append is in place.
-    mutating func appendCoalescing(_ data: Data) {
+    /// Appends to the newest entry when it is a write of the same kind, so a
+    /// detached flood stays one entry. The slot is cleared first so the append
+    /// is in place.
+    mutating func appendCoalescing(_ data: Data, replay: Bool = false) {
         let last = storage.count - 1
-        guard last >= head, case var .write(merged)? = storage[last]?.operation else {
-            append(.write(data))
+        guard last >= head, case .write(var merged, replay)? = storage[last]?.operation else {
+            append(.write(data, replay: replay))
             return
         }
         storage[last] = nil
         merged.append(data)
         appendedSequence += 1
-        storage[last] = Entry(operation: .write(merged), sequence: appendedSequence)
+        storage[last] = Entry(operation: .write(merged, replay: replay), sequence: appendedSequence)
         writeByteCount += data.count
     }
 
@@ -64,7 +66,7 @@ struct InMemoryTerminalPendingOperations {
             head += 1
             guard let entry else { continue }
             count -= 1
-            if case let .write(data) = entry.operation {
+            if case let .write(data, _) = entry.operation {
                 writeByteCount -= data.count
             }
             retiredSequence = entry.sequence
@@ -80,7 +82,7 @@ struct InMemoryTerminalPendingOperations {
         var excess = writeByteCount - limit
         var index = head
         while excess > 0, index < storage.count {
-            guard let entry = storage[index], case var .write(data) = entry.operation else {
+            guard let entry = storage[index], case .write(var data, let replay) = entry.operation else {
                 index += 1
                 continue
             }
@@ -93,7 +95,7 @@ struct InMemoryTerminalPendingOperations {
                 retiredSequence = max(retiredSequence, entry.sequence)
             } else {
                 data.removeFirst(dropped)
-                storage[index] = Entry(operation: .write(Data(data)), sequence: entry.sequence)
+                storage[index] = Entry(operation: .write(Data(data), replay: replay), sequence: entry.sequence)
             }
             index += 1
         }

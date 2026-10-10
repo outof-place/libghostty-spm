@@ -13,6 +13,7 @@ final class InMemoryTerminalSurfaceAccess: @unchecked Sendable {
         qos: .userInitiated,
     )
     private let write: Write
+    private let replay: Write
     private let processExit: ProcessExit
     private let tick: Tick
 
@@ -62,10 +63,12 @@ final class InMemoryTerminalSurfaceAccess: @unchecked Sendable {
 
     init(
         write: @escaping Write,
+        replay: Write? = nil,
         processExit: @escaping ProcessExit,
         tick: @escaping Tick,
     ) {
         self.write = write
+        self.replay = replay ?? write
         self.processExit = processExit
         self.tick = tick
     }
@@ -110,10 +113,10 @@ final class InMemoryTerminalSurfaceAccess: @unchecked Sendable {
         return surface
     }
 
-    func enqueueWrite(_ data: Data) {
+    func enqueueWrite(_ data: Data, replay: Bool = false) {
         condition.lock()
         if surface == nil {
-            operations.appendCoalescing(data)
+            operations.appendCoalescing(data, replay: replay)
             if operations.writeByteCount > Self.pendingWriteByteLimit {
                 pendingTrimOwed = true
                 if operations.writeByteCount > 2 * Self.pendingWriteByteLimit {
@@ -121,7 +124,7 @@ final class InMemoryTerminalSurfaceAccess: @unchecked Sendable {
                 }
             }
         } else {
-            operations.append(.write(data))
+            operations.append(.write(data, replay: replay))
             scheduleDrain()
         }
         let backlogChange = takeBacklogChange()
@@ -263,8 +266,8 @@ final class InMemoryTerminalSurfaceAccess: @unchecked Sendable {
 
         defer { finishOperation() }
         switch operation {
-        case let .write(data):
-            write(surface, data)
+        case let .write(data, isReplay):
+            (isReplay ? replay : write)(surface, data)
         case let .processExit(exitCode, runtimeMilliseconds):
             processExit(surface, exitCode, runtimeMilliseconds)
         }

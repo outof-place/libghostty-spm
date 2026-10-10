@@ -41,25 +41,7 @@ public final class InMemoryTerminalSession: @unchecked Sendable {
         self.suppressesPixelOnlyResizes = suppressesPixelOnlyResizes
         surfaceAccess = InMemoryTerminalSurfaceAccess(
             write: Self.writeToSurface,
-            processExit: Self.reportProcessExit,
-            tick: Self.tickApp,
-        )
-    }
-
-    /// A session for a host that answers terminal queries (DA, DSR, colors) itself, such as a
-    /// runtime that already replies for the PTY: output is written with
-    /// `ghostty_surface_write_buffer_replay`, so Ghostty parses it without replying a second time.
-    public convenience init(
-        write: @escaping @Sendable (Data) -> Void,
-        resize: @escaping @Sendable (InMemoryTerminalViewport) -> Void,
-        suppressesPixelOnlyResizes: Bool = false,
-        hostAnswersQueries: Bool,
-    ) {
-        self.init(
-            write: write,
-            resize: resize,
-            suppressesPixelOnlyResizes: suppressesPixelOnlyResizes,
-            surfaceWrite: hostAnswersQueries ? Self.replayToSurface : Self.writeToSurface,
+            replay: Self.replayToSurface,
             processExit: Self.reportProcessExit,
             tick: Self.tickApp,
         )
@@ -197,6 +179,14 @@ public final class InMemoryTerminalSession: @unchecked Sendable {
             .output,
             "terminal <- host \(TerminalDebugLog.describe(data))",
         )
+    }
+
+    /// Like ``receive(_:)``, for history the host already answered: the
+    /// terminal parses it without replying to the queries inside it
+    /// (`ghostty_surface_write_buffer_replay`). Order with ``receive(_:)`` is
+    /// kept, so a seed written here precedes the live output after it.
+    public func receiveReplay(_ data: Data) {
+        surfaceAccess.enqueueWrite(data, replay: true)
     }
 
     /// Bytes passed to ``receive(_:)`` that the terminal has not parsed yet.
