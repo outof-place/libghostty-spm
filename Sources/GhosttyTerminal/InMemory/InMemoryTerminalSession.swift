@@ -46,6 +46,25 @@ public final class InMemoryTerminalSession: @unchecked Sendable {
         )
     }
 
+    /// A session for a host that answers terminal queries (DA, DSR, colors) itself, such as a
+    /// runtime that already replies for the PTY: output is written with
+    /// `ghostty_surface_write_buffer_replay`, so Ghostty parses it without replying a second time.
+    public convenience init(
+        write: @escaping @Sendable (Data) -> Void,
+        resize: @escaping @Sendable (InMemoryTerminalViewport) -> Void,
+        suppressesPixelOnlyResizes: Bool = false,
+        hostAnswersQueries: Bool,
+    ) {
+        self.init(
+            write: write,
+            resize: resize,
+            suppressesPixelOnlyResizes: suppressesPixelOnlyResizes,
+            surfaceWrite: hostAnswersQueries ? Self.replayToSurface : Self.writeToSurface,
+            processExit: Self.reportProcessExit,
+            tick: Self.tickApp,
+        )
+    }
+
     /// Test seam: the surface handed to `setSurface` is a stand-in, so every
     /// C call on it is injected, and the tick defaults to a no-op.
     init(
@@ -368,6 +387,15 @@ public final class InMemoryTerminalSession: @unchecked Sendable {
                 return
             }
             ghostty_surface_write_buffer(surface, ptr, UInt(buffer.count))
+        }
+    }
+
+    private static func replayToSurface(_ surface: ghostty_surface_t, _ data: Data) {
+        data.withUnsafeBytes { buffer in
+            guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return
+            }
+            ghostty_surface_write_buffer_replay(surface, ptr, UInt(buffer.count))
         }
     }
 
