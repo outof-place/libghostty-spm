@@ -358,6 +358,20 @@ pastes as its escaped path) or strings are sent as text. A drop never
 becomes keystrokes, and paste protection is not consulted for it — a drop is
 the user's own act, like the accessory bar's Paste button.
 
+AppKit drops (`AppTerminalView+Drop.swift`, registered in `commonInit`) take
+the same road: file URLs paste as escaped paths, image data with no file
+(PNG, JPEG, GIF, WebP; TIFF is converted to PNG) is staged, links and text
+paste as text. `acceptsFileDrops = false` turns files off for a host whose
+shell runs on another machine; links and text still drop.
+`AppTerminalView.pasteboardName` names the pasteboard Copy, Paste and a
+program's OSC 52 use (the general one by default, held per surface on
+`TerminalCallbackBridge`); the AppKit input tests (`AppKitInputRig`) give
+every view a private one, so a test run never reads or writes the user's
+clipboard. The right-click menu is `terminalContextMenu()` (Copy with a
+selection, Paste, Select All; hosts append to it): it opens on a right click
+inside a selection, and on one ghostty did not consume (no mouse reporting),
+which `rightMouseDown` hands to `super` as upstream does.
+
 `TerminalFileStaging` (`Platform/Shared`, no UIKit or AppKit dependency so
 `swift test` covers it on macOS in `TerminalFileStagingTests`) owns the
 staged files: `directory` (default `<tmp>/ghostty-paste`;

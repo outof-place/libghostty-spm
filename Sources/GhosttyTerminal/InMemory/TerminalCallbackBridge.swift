@@ -8,6 +8,10 @@
 import Foundation
 import GhosttyKit
 
+#if !canImport(UIKit) && canImport(AppKit)
+    import AppKit
+#endif
+
 /// Dispatches C runtime callbacks to a ``TerminalSurfaceViewDelegate``.
 ///
 /// An instance of this class is passed as the `userdata` pointer in the
@@ -18,6 +22,11 @@ final class TerminalCallbackBridge {
     weak var delegate: (any TerminalSurfaceViewDelegate)?
     /// Raw surface pointer for use in C callbacks (e.g. clipboard).
     nonisolated(unsafe) var rawSurface: ghostty_surface_t?
+    #if !canImport(UIKit) && canImport(AppKit)
+        /// The pasteboard this surface copies to and pastes from (a program's
+        /// OSC 52 too): the general one unless the host names another.
+        nonisolated(unsafe) var pasteboardName: NSPasteboard.Name = .general
+    #endif
     var scrollbar: TerminalScrollbar?
     var onCellSizeChange: ((UInt32, UInt32) -> Void)?
     var onRenderRequest: (() -> Void)?

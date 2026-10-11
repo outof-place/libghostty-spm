@@ -107,14 +107,14 @@ private enum TerminalCallbacks {
             "clipboard write count=\(payloads.count) mimes=\(payloads.map(\.mime).joined(separator: ",")) confirm=\(confirm)",
         )
 
-        guard confirm else {
-            terminalRunOnMain { setPasteboardString(payloads) }
-            return
-        }
         guard let userdata else { return }
         let bridge = Unmanaged<TerminalCallbackBridge>
             .fromOpaque(userdata)
             .takeUnretainedValue()
+        guard confirm else {
+            terminalRunOnMain { setPasteboardString(payloads, for: bridge) }
+            return
+        }
         let text = firstTextRepresentation(in: payloads) ?? ""
         terminalRunOnMain {
             bridge.handleClipboardConfirmation(contents: text, kind: .osc52Write) { allowed in
@@ -123,19 +123,19 @@ private enum TerminalCallbacks {
                     allowed ? "clipboard write allowed" : "clipboard write denied",
                 )
                 guard allowed else { return }
-                setPasteboardString(payloads)
+                setPasteboardString(payloads, for: bridge)
             }
         }
     }
 
     @MainActor
-    private static func setPasteboardString(_ payloads: [TerminalClipboardContent]) {
+    private static func setPasteboardString(_ payloads: [TerminalClipboardContent], for bridge: TerminalCallbackBridge) {
         #if canImport(UIKit)
             if let text = payloads.first(where: { isTextLikeMime($0.mime) }) {
                 UIPasteboard.general.string = String(decoding: text.data, as: UTF8.self)
             }
         #elseif canImport(AppKit)
-            let pasteboard = NSPasteboard.general
+            let pasteboard = NSPasteboard(name: bridge.pasteboardName)
             pasteboard.clearContents()
             for payload in payloads {
                 if isTextLikeMime(payload.mime) {
@@ -186,7 +186,7 @@ private enum TerminalCallbacks {
         }
 
         guard !wantsListOnly else {
-            let available = TerminalPasteboardContent.hasText() ? ["text/plain"] : []
+            let available = hasPasteboardText(for: bridge) ? ["text/plain"] : []
             TerminalDebugLog.log(.input, "clipboard paste list available=\(available)")
             bridge.completeClipboardRead(statePtr: statePtr, contents: [], available: available)
             return GHOSTTY_CLIPBOARD_READ_STARTED
@@ -198,7 +198,7 @@ private enum TerminalCallbacks {
         // write files as a side effect; a host paste that finds image or
         // document data materialises it itself
         // (`UITerminalView.pasteFromPasteboard`).
-        let string = TerminalPasteboardContent.text()
+        let string = pasteboardText(for: bridge)
 
         let hasText = string.map { !$0.isEmpty } ?? false
         let available = listAvailable && hasText ? ["text/plain"] : []
@@ -216,6 +216,22 @@ private enum TerminalCallbacks {
         bridge.completeClipboardRead(statePtr: statePtr, contents: [content], available: available)
         TerminalDebugLog.log(.input, "clipboard paste complete")
         return GHOSTTY_CLIPBOARD_READ_STARTED
+    }
+
+    private static func pasteboardText(for bridge: TerminalCallbackBridge) -> String? {
+        #if canImport(UIKit)
+            TerminalPasteboardContent.text()
+        #elseif canImport(AppKit)
+            TerminalPasteboardContent.text(from: NSPasteboard(name: bridge.pasteboardName))
+        #endif
+    }
+
+    private static func hasPasteboardText(for bridge: TerminalCallbackBridge) -> Bool {
+        #if canImport(UIKit)
+            TerminalPasteboardContent.hasText()
+        #elseif canImport(AppKit)
+            TerminalPasteboardContent.hasText(in: NSPasteboard(name: bridge.pasteboardName))
+        #endif
     }
 
     /// libghostty determined the pending read needs the host's explicit

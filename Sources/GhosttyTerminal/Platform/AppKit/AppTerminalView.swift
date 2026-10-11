@@ -23,6 +23,7 @@
         var keyEcho: KeyEchoState = .init()
         var pointer: PointerSelectionState = .init()
         var focusBridge: FocusBridgeState = .init()
+        var drop: DropState = .init()
 
         open weak var delegate: (any TerminalSurfaceViewDelegate)? {
             get { core.delegate }
@@ -37,6 +38,14 @@
         open var configuration: TerminalSurfaceOptions {
             get { core.configuration }
             set { core.configuration = newValue }
+        }
+
+        /// Where Copy writes and Paste reads, a program's OSC 52 included:
+        /// the general pasteboard unless the host names its own (tests use a
+        /// private one so they never touch the user's clipboard).
+        open var pasteboardName: NSPasteboard.Name {
+            get { core.bridge.pasteboardName }
+            set { core.bridge.pasteboardName = newValue }
         }
 
         open func setSurfaceVisible(_ visible: Bool) {
@@ -81,6 +90,7 @@
 
             inputHandler = TerminalKeyEventHandler(view: self)
             setupTrackingArea()
+            setupDropInput()
 
             core.isAttached = { [weak self] in self?.window != nil }
             core.displayLinkContext = .view(self)
@@ -136,6 +146,23 @@
             )
             copyItem.target = self
             menu.addItem(copyItem)
+            return menu
+        }
+
+        /// The right-click menu: Copy while ghostty has a selection, then
+        /// Paste and Select All. It opens on a right click inside a
+        /// selection, and on one the program did not take (no mouse
+        /// reporting) — upstream's rule. Hosts add their own items to it.
+        open func terminalContextMenu() -> NSMenu {
+            let menu = surface?.hasSelection() == true ? selectionContextMenu() : NSMenu()
+            for (title, action) in [
+                (String(localized: "Paste", bundle: .module), #selector(paste(_:))),
+                (String(localized: "Select All", bundle: .module), #selector(selectAll(_:))),
+            ] {
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = self
+                menu.addItem(item)
+            }
             return menu
         }
 

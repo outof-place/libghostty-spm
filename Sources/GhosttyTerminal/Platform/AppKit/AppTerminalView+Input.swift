@@ -120,7 +120,7 @@
         }
 
         @IBAction func paste(_: Any?) {
-            if let text = NSPasteboard.general.string(forType: .string) {
+            if let text = NSPasteboard(name: pasteboardName).string(forType: .string) {
                 TerminalDebugLog.log(
                     .input,
                     "paste binding bytes=\(text.utf8.count) lines=\(TerminalInputText.lineCount(in: text))",
@@ -171,11 +171,16 @@
                 pointer.pendingSelectionMenuPoint = menuPoint
                 return
             }
-            surface?.sendMouseButton(
+            let consumed = surface?.sendMouseButton(
                 state: GHOSTTY_MOUSE_PRESS,
                 button: GHOSTTY_MOUSE_RIGHT,
                 mods: mods.ghosttyMods,
-            )
+            ) ?? true
+            // A press nobody took (no mouse reporting; ghostty's
+            // `right-click-action = context-menu`) is AppKit's to turn into
+            // the context menu, through `menu(for:)`.
+            guard !consumed else { return }
+            super.rightMouseDown(with: event)
         }
 
         override open func rightMouseUp(with event: NSEvent) {
@@ -194,12 +199,8 @@
             )
         }
 
-        override open func menu(for event: NSEvent) -> NSMenu? {
-            let (x, y) = mousePoint(from: event)
-            guard selectionMenuPoint(at: CGPoint(x: x, y: y)) != nil else {
-                return super.menu(for: event)
-            }
-            return selectionContextMenu()
+        override open func menu(for _: NSEvent) -> NSMenu? {
+            terminalContextMenu()
         }
 
         override open func otherMouseDown(with event: NSEvent) {
@@ -265,7 +266,7 @@
         }
 
         private func showSelectionCopyMenu(with event: NSEvent) {
-            let menu = selectionContextMenu()
+            let menu = terminalContextMenu()
             NSMenu.popUpContextMenu(menu, with: event, for: self)
         }
 
