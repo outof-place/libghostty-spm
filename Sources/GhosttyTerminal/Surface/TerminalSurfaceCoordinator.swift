@@ -59,6 +59,7 @@ final class TerminalSurfaceCoordinator {
     var onMetricsUpdate: (() -> Void)?
     var onCellSizeDidChange: (() -> Void)?
     var onMouseShape: ((ghostty_action_mouse_shape_e) -> Void)?
+    var onMouseVisibility: ((Bool) -> Void)?
 
     /// Called after every display-link render (`tick`).
     ///
@@ -143,6 +144,9 @@ final class TerminalSurfaceCoordinator {
         }
         bridge.onMouseShape = { [weak self] shape in
             self?.onMouseShape?(shape)
+        }
+        bridge.onMouseVisibility = { [weak self] visible in
+            self?.onMouseVisibility?(visible)
         }
         bridge.onConfigChange = { [weak self] in
             self?.reloadFontSizeConfiguration()

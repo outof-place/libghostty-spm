@@ -230,6 +230,12 @@
             let (x, y) = mousePoint(from: event)
             let mods = TerminalInputModifiers(from: event.modifierFlags)
             surface?.sendMousePos(x: x, y: y, mods: mods.ghosttyMods)
+            // `focus-follows-mouse`, as Ghostty's macOS app does it: only in
+            // the key window, and never while a button is held.
+            if controller?.focusFollowsMouse == true, NSEvent.pressedMouseButtons == 0,
+               let window, window.isKeyWindow, window.firstResponder !== self {
+                window.makeFirstResponder(self)
+            }
         }
 
         /// ghostty clears link hover only on a negative position; the

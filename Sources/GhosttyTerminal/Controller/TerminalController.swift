@@ -119,6 +119,8 @@ public final class TerminalController {
     /// Mac Catalyst, 14 elsewhere), and Ghostty's own per-OS default when
     /// neither does. No surface exists before the first config loads.
     var configuredFontSize: Float = 0
+    /// Ghostty's `focus-follows-mouse`, read back from the effective config.
+    public internal(set) var focusFollowsMouse = false
 
     // MARK: - Public Accessors
 

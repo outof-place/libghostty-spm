@@ -95,9 +95,15 @@ private enum TerminalCallbacks {
         // The selection clipboard is advertised (`supports_selection_clipboard`)
         // so that `copy-on-select` writes there and not to the one pasteboard
         // the user has — otherwise every drag, and every double-click a tap
-        // lands within ghostty's click interval, would replace it. Nothing
-        // exposes a primary selection, so those writes go nowhere.
-        guard clipboard == GHOSTTY_CLIPBOARD_STANDARD else { return }
+        // lands within ghostty's click interval, would replace it. It is kept
+        // in this process (TerminalPrimarySelection) for a middle click.
+        guard clipboard == GHOSTTY_CLIPBOARD_STANDARD else {
+            guard clipboard == GHOSTTY_CLIPBOARD_SELECTION, let userdata else { return }
+            let bridge = Unmanaged<TerminalCallbackBridge>.fromOpaque(userdata).takeUnretainedValue()
+            let text = firstTextRepresentation(in: copyClipboardContents(contents, count: contentsLen))
+            TerminalPrimarySelection.set(text, for: selectionKey(for: bridge))
+            return
+        }
 
         let payloads = copyClipboardContents(contents, count: contentsLen)
         guard !payloads.isEmpty else { return }
@@ -158,7 +164,7 @@ private enum TerminalCallbacks {
     /// program.
     static func readClipboard(
         userdata: UnsafeMutableRawPointer?,
-        clipboard _: ghostty_clipboard_e,
+        clipboard: ghostty_clipboard_e,
         statePtr: UnsafeMutableRawPointer?,
         mimes: UnsafePointer<UnsafePointer<CChar>?>?,
         mimesLen: Int,
@@ -185,8 +191,15 @@ private enum TerminalCallbacks {
             return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED
         }
 
+        // A middle click (or a program's OSC 52 read of `p`/`s`) asks for the
+        // selection clipboard: what was last selected, never the pasteboard.
+        let selection = clipboard == GHOSTTY_CLIPBOARD_SELECTION
+            ? TerminalPrimarySelection.text(for: selectionKey(for: bridge)) ?? ""
+            : nil
+
         guard !wantsListOnly else {
-            let available = hasPasteboardText(for: bridge) ? ["text/plain"] : []
+            let hasText = selection.map { !$0.isEmpty } ?? hasPasteboardText(for: bridge)
+            let available = hasText ? ["text/plain"] : []
             TerminalDebugLog.log(.input, "clipboard paste list available=\(available)")
             bridge.completeClipboardRead(statePtr: statePtr, contents: [], available: available)
             return GHOSTTY_CLIPBOARD_READ_STARTED
@@ -198,7 +211,7 @@ private enum TerminalCallbacks {
         // write files as a side effect; a host paste that finds image or
         // document data materialises it itself
         // (`UITerminalView.pasteFromPasteboard`).
-        let string = pasteboardText(for: bridge)
+        let string = selection ?? pasteboardText(for: bridge)
 
         let hasText = string.map { !$0.isEmpty } ?? false
         let available = listAvailable && hasText ? ["text/plain"] : []
@@ -223,6 +236,15 @@ private enum TerminalCallbacks {
             TerminalPasteboardContent.text()
         #elseif canImport(AppKit)
             TerminalPasteboardContent.text(from: NSPasteboard(name: bridge.pasteboardName))
+        #endif
+    }
+
+    /// One selection clipboard per pasteboard the surfaces use.
+    private static func selectionKey(for bridge: TerminalCallbackBridge) -> String {
+        #if canImport(UIKit)
+            "general"
+        #elseif canImport(AppKit)
+            bridge.pasteboardName.rawValue
         #endif
     }
 

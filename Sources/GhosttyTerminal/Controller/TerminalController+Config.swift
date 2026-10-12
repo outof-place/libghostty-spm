@@ -251,6 +251,10 @@ extension TerminalController {
             configuredFontSize = fontSize
         }
 
+        let followsKey = "focus-follows-mouse"
+        var follows = false
+        focusFollowsMouse = ghostty_config_get(prepared.rawValue, &follows, followsKey, UInt(followsKey.utf8.count)) && follows
+
         for onChange in configObservers.values {
             onChange()
         }

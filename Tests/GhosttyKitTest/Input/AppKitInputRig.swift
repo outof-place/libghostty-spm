@@ -19,9 +19,13 @@
         let window: NSWindow
         let pasteboard = NSPasteboard(name: .init("ghostty-input-test-\(UUID().uuidString)"))
 
+        /// `config`: more ghostty settings; `keyWindow`: a window that says
+        /// it is key (still never ordered in), for what only a key window does.
         init(
             view: AppTerminalView = AppTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 500)),
             optionAsAlt: String? = "left",
+            config: [(String, String)] = [],
+            keyWindow: Bool = false,
         ) {
             let outbound = outbound
             session = InMemoryTerminalSession(write: { outbound.append($0) }, resize: { _ in })
@@ -29,9 +33,11 @@
             view.pasteboardName = pasteboard.name
             view.controller = TerminalController {
                 if let optionAsAlt { $0.withCustom("macos-option-as-alt", optionAsAlt) }
+                for (key, value) in config { $0.withCustom(key, value) }
             }
             view.configuration = TerminalSurfaceOptions(backend: .inMemory(session))
-            window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            window = (keyWindow ? KeyWindow.self : NSWindow.self)
+                .init(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
             window.contentView = view
             window.makeFirstResponder(view)
             pasteboard.clearContents()
@@ -117,6 +123,11 @@
             view.mouseDown(with: mouse(.leftMouseDown, at: at, flags: .command))
             view.mouseUp(with: mouse(.leftMouseUp, at: at, flags: .command))
         }
+    }
+
+    /// Key without being shown: AppKit makes only an ordered-in window key.
+    final class KeyWindow: NSWindow {
+        override var isKeyWindow: Bool { true }
     }
 
     /// A hardware key: its virtual keycode, what it types, and its modifiers

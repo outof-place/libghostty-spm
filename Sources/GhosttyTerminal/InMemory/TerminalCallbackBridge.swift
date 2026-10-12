@@ -31,6 +31,8 @@ final class TerminalCallbackBridge {
     var onCellSizeChange: ((UInt32, UInt32) -> Void)?
     var onRenderRequest: (() -> Void)?
     var onMouseShape: ((ghostty_action_mouse_shape_e) -> Void)?
+    /// `mouse-hide-while-typing`: false when a key press hides the pointer.
+    var onMouseVisibility: ((Bool) -> Void)?
     var onConfigChange: (() -> Void)?
 
     init(delegate: (any TerminalSurfaceViewDelegate)? = nil) {
@@ -153,6 +155,11 @@ final class TerminalCallbackBridge {
             onMouseShape?(shape)
             (delegate as? any TerminalSurfaceMouseShapeDelegate)?
                 .terminalDidChangeMouseShape(TerminalMouseShape(shape))
+
+        case GHOSTTY_ACTION_MOUSE_VISIBILITY:
+            let visible = action.action.mouse_visibility == GHOSTTY_MOUSE_VISIBLE
+            TerminalDebugLog.log(.actions, "callback action=mouse_visibility visible=\(visible)")
+            onMouseVisibility?(visible)
 
         case GHOSTTY_ACTION_MOUSE_OVER_LINK:
             let payload = action.action.mouse_over_link

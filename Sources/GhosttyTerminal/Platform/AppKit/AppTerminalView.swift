@@ -116,6 +116,9 @@
             core.onPostRender = { [weak self] in
                 self?.enforceMetalLayerScale()
             }
+            core.onMouseVisibility = { [weak self] visible in
+                self?.terminalMouseVisibilityDidChange(visible: visible)
+            }
         }
 
         /// Upstream's rule: Copy is offered whenever ghostty has a selection.
@@ -147,6 +150,12 @@
             copyItem.target = self
             menu.addItem(copyItem)
             return menu
+        }
+
+        /// `mouse-hide-while-typing`: a key press hid the pointer, until the
+        /// mouse moves (Ghostty's macOS app does the same).
+        open func terminalMouseVisibilityDidChange(visible: Bool) {
+            if !visible { NSCursor.setHiddenUntilMouseMoves(true) }
         }
 
         /// The right-click menu: Copy while ghostty has a selection, then

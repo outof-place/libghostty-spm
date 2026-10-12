@@ -346,8 +346,12 @@ a phone's clipboard holds far more often than a desktop's) is the host
 button's business alone: `pasteFromPasteboard` calls
 `TerminalPasteboardContent.files`, which stages it through
 `TerminalFileStaging` and sends the escaped paths on the text path. Only the
-standard clipboard is read or written; selection clipboard traffic
-(`copy-on-select`) is dropped so a drag never replaces the user's pasteboard.
+standard clipboard is read or written on a pasteboard. The selection
+clipboard (`copy-on-select = primary`) lives in this process instead
+(`TerminalPrimarySelection`, one per pasteboard name), so a drag never
+replaces the user's pasteboard; a middle click (`middle-click-action =
+primary-paste`, Ghostty's default) pastes it, and pastes nothing when
+nothing was selected.
 
 Drops (`UITerminalView+Drop.swift`, a `UIDropInteraction`, iOS and Catalyst)
 go the same way: items with a stageable type (`TerminalFileStaging.fileType(among:)`
@@ -371,6 +375,11 @@ clipboard. The right-click menu is `terminalContextMenu()` (Copy with a
 selection, Paste, Select All; hosts append to it): it opens on a right click
 inside a selection, and on one ghostty did not consume (no mouse reporting),
 which `rightMouseDown` hands to `super` as upstream does.
+`mouse-hide-while-typing` hides the pointer until the mouse moves
+(`terminalMouseVisibilityDidChange`, `open` for hosts and tests), and
+`focus-follows-mouse` gives the terminal under the pointer the keyboard in a
+key window while no button is held (`TerminalController.focusFollowsMouse`,
+read back from the effective config).
 
 `TerminalFileStaging` (`Platform/Shared`, no UIKit or AppKit dependency so
 `swift test` covers it on macOS in `TerminalFileStagingTests`) owns the
