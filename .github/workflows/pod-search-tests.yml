@@ -46,4 +46,4 @@ jobs:
 
       - name: Test
         working-directory: References/ghostty-upstream
-        run: zig build test -Dtest-filter="${{ github.event.inputs.filter || 'SlidingWindow' }}"
+        run: zig build test -Dtest-filter="${{ github.event.inputs.filter || 'SlidingWindow' }}" --summary all
