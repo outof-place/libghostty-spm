@@ -1,0 +1,85 @@
+name: Pod Build macOS
+
+# Pod's macOS-only XCFramework for a pod-native branch: the pinned Ghostty
+# with the branch's patch stack, published as `upstream.<sha12>+pod.<N>`
+# (N from Ghostty.build), as `upstream.35a81a980bb9+pod.1` was by hand.
+# build.yml builds every platform and can only be dispatched from main; Pod
+# needs macOS alone. A push that changes the stack or Ghostty.build runs it;
+# an existing tag ends it early.
+
+on:
+  push:
+    branches: ["pod-native-*"]
+    paths:
+      - "Ghostty.ref"
+      - "Ghostty.build"
+      - "Patches/ghostty/**"
+      - ".github/workflows/pod-build-macos.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pod-build-macos-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Tag
+        id: tag
+        run: |
+          REF=$(tr -d '[:space:]' < Ghostty.ref)
+          BUILD=$(tr -d '[:space:]' < Ghostty.build 2>/dev/null || echo 1)
+          TAG="upstream.${REF:0:12}+pod.${BUILD}"
+          git fetch --tags origin
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "[*] $TAG already published"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Zig
+        if: steps.tag.outputs.skip != 'true'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Clone Ghostty
+        if: steps.tag.outputs.skip != 'true'
+        run: |
+          git clone https://github.com/ghostty-org/ghostty ./References/ghostty-upstream
+          git -C ./References/ghostty-upstream checkout "${{ steps.tag.outputs.ref }}"
+
+      - name: Build
+        if: steps.tag.outputs.skip != 'true'
+        run: ./build.sh --platforms macos --source "$PWD/References/ghostty-upstream" --skip-tests
+
+      - name: Checksum
+        if: steps.tag.outputs.skip != 'true'
+        run: |
+          mv build/GhosttyKit.xcframework.zip GhosttyKit-macos.xcframework.zip
+          shasum -a 256 GhosttyKit-macos.xcframework.zip
+
+      - name: Release
+        if: steps.tag.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.tag.outputs.tag }} (macOS)
+          body: |
+            GhosttyKit XCFramework, macOS slice only, for Pod.
+
+            Ghostty commit: https://github.com/ghostty-org/ghostty/commit/${{ steps.tag.outputs.ref }}
+            Patch stack: Patches/ghostty at ${{ github.sha }} (${{ github.ref_name }})
+          prerelease: true
+          files: GhosttyKit-macos.xcframework.zip
