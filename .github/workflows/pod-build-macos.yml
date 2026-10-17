@@ -4,8 +4,11 @@ name: Pod Build macOS
 # with the branch's patch stack, published as `upstream.<sha12>+pod.<N>`
 # (N from Ghostty.build), as `upstream.35a81a980bb9+pod.1` was by hand.
 # build.yml builds every platform and can only be dispatched from main; Pod
-# needs macOS alone. A push that changes the stack or Ghostty.build runs it;
-# an existing tag ends it early.
+# needs macOS alone. A push that changes the stack or Ghostty.build runs it.
+# An existing tag ends it early when it was built from the same Ghostty.ref
+# and patches, and fails it otherwise (bump Ghostty.build): a published asset
+# is never replaced. Runs of every branch queue in one group, so two branches
+# can't race to the same tag. Actions are pinned by commit.
 
 on:
   push:
@@ -20,8 +23,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: pod-build-macos-${{ github.ref_name }}
-  cancel-in-progress: true
+  group: pod-build-macos
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -29,7 +32,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
 
@@ -41,7 +44,11 @@ jobs:
           TAG="upstream.${REF:0:12}+pod.${BUILD}"
           git fetch --tags origin
           if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "[*] $TAG already published"
+            if ! git diff --quiet "refs/tags/$TAG" HEAD -- Ghostty.ref Patches/ghostty; then
+              echo "::error::$TAG was built from other patches; bump Ghostty.build"
+              exit 1
+            fi
+            echo "[*] $TAG already published from these patches"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
@@ -49,7 +56,7 @@ jobs:
 
       - name: Setup Zig
         if: steps.tag.outputs.skip != 'true'
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
 
@@ -71,8 +78,10 @@ jobs:
 
       - name: Release
         if: steps.tag.outputs.skip != 'true'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
+          overwrite_files: false
+          fail_on_unmatched_files: true
           tag_name: ${{ steps.tag.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.tag.outputs.tag }} (macOS)
