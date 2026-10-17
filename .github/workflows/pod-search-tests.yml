@@ -1,10 +1,17 @@
 name: Pod Search Tests
 
 # Runs the pinned Ghostty's terminal search unit tests with the patch stack
-# applied: the tests a search patch (0020) adds or touches. Dispatch only;
-# build.yml compiles the library but runs no Zig tests.
+# applied: the tests a search patch (0020) adds or touches. build.yml
+# compiles the library but runs no Zig tests. A push to a pod-native branch
+# that changes the patch stack runs it (a dispatch needs the file on main).
 
 on:
+  push:
+    branches: ["pod-native-*"]
+    paths:
+      - "Ghostty.ref"
+      - "Patches/ghostty/**"
+      - ".github/workflows/pod-search-tests.yml"
   workflow_dispatch:
     inputs:
       filter:
@@ -39,4 +46,4 @@ jobs:
 
       - name: Test
         working-directory: References/ghostty-upstream
-        run: zig build test -Dtest-filter="${{ github.event.inputs.filter }}"
+        run: zig build test -Dtest-filter="${{ github.event.inputs.filter || 'SlidingWindow' }}"
