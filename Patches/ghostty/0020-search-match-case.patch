@@ -28,10 +28,10 @@ index 0b7813219..c462dc319 100644
          {
              self.opts.mutex.lockUncancelable(global.io());
 diff --git a/src/terminal/search/sliding_window.zig b/src/terminal/search/sliding_window.zig
-index 95b37d730..55bb507ad 100644
+index 95b37d730..04eff6d1a 100644
 --- a/src/terminal/search/sliding_window.zig
 +++ b/src/terminal/search/sliding_window.zig
-@@ -66,6 +66,19 @@ pub const SlidingWindow = struct {
+@@ -66,6 +66,14 @@ pub const SlidingWindow = struct {
      /// The needle we're searching for. Does own the memory.
      needle: []const u8,
  
@@ -43,14 +43,21 @@ index 95b37d730..55bb507ad 100644
 +    /// the same case.
 +    match_case: bool,
 +
+     /// The search direction. If the direction is forward then pages should
+     /// be appended in forward linked list order from the PageList. If the
+     /// direction is reverse then pages should be appended in reverse order.
+@@ -83,6 +91,11 @@ pub const SlidingWindow = struct {
+     /// ends on another. The length is always `needle.len * 2`.
+     overlap_buf: []u8,
+ 
 +    /// A needle that starts with this byte (U+0001, which no cell holds)
 +    /// matches case-sensitively. It travels in the needle, so every search
 +    /// that is restarted from a needle keeps it.
 +    pub const match_case_marker: u8 = 0x01;
 +
-     /// The search direction. If the direction is forward then pages should
-     /// be appended in forward linked list order from the PageList. If the
-     /// direction is reverse then pages should be appended in reverse order.
+     const Direction = enum { forward, reverse };
+     const DataBuf = CircBuf(u8, 0);
+     const MetaBuf = CircBuf(Meta, undefined);
 @@ -125,6 +138,12 @@ pub const SlidingWindow = struct {
              .forward => {},
              .reverse => std.mem.reverse(u8, needle),
