@@ -1,0 +1,283 @@
+diff --git a/src/terminal/search/Thread.zig b/src/terminal/search/Thread.zig
+index 0b7813219..c462dc319 100644
+--- a/src/terminal/search/Thread.zig
++++ b/src/terminal/search/Thread.zig
+@@ -26,6 +26,7 @@ const Terminal = @import("../Terminal.zig");
+ 
+ const ScreenSearch = @import("screen.zig").ScreenSearch;
+ const TerminalSearch = @import("terminal.zig").TerminalSearch;
++const SlidingWindow = @import("sliding_window.zig").SlidingWindow;
+ 
+ const log = std.log.scoped(.search_thread);
+ 
+@@ -287,8 +288,14 @@ fn changeNeedle(self: *Thread, needle: []const u8) !void {
+ 
+     // Stop the previous search
+     if (self.search) |*s| {
+-        // If our search is unchanged, do nothing.
+-        if (std.ascii.eqlIgnoreCase(s.needle(), needle)) return;
++        // If our search is unchanged, do nothing. A case-sensitive needle
++        // (SlidingWindow.match_case_marker) changes with any letter's case.
++        const match_case = needle.len > 0 and
++            needle[0] == SlidingWindow.match_case_marker;
++        if (if (match_case)
++            std.mem.eql(u8, s.needle(), needle)
++        else
++            std.ascii.eqlIgnoreCase(s.needle(), needle)) return;
+ 
+         {
+             self.opts.mutex.lockUncancelable(global.io());
+diff --git a/src/terminal/search/sliding_window.zig b/src/terminal/search/sliding_window.zig
+index 95b37d730..55bb507ad 100644
+--- a/src/terminal/search/sliding_window.zig
++++ b/src/terminal/search/sliding_window.zig
+@@ -66,6 +66,19 @@ pub const SlidingWindow = struct {
+     /// The needle we're searching for. Does own the memory.
+     needle: []const u8,
+ 
++    /// What is matched: the needle without its `match_case_marker`, if
++    /// it has one (in `needle`'s memory).
++    pattern: []const u8,
++
++    /// The needle started with `match_case_marker`: letters match only in
++    /// the same case.
++    match_case: bool,
++
++    /// A needle that starts with this byte (U+0001, which no cell holds)
++    /// matches case-sensitively. It travels in the needle, so every search
++    /// that is restarted from a needle keeps it.
++    pub const match_case_marker: u8 = 0x01;
++
+     /// The search direction. If the direction is forward then pages should
+     /// be appended in forward linked list order from the PageList. If the
+     /// direction is reverse then pages should be appended in reverse order.
+@@ -125,6 +138,12 @@ pub const SlidingWindow = struct {
+             .forward => {},
+             .reverse => std.mem.reverse(u8, needle),
+         }
++        const match_case = needle_unowned.len > 0 and
++            needle_unowned[0] == match_case_marker;
++        const pattern: []const u8 = if (!match_case) needle else switch (direction) {
++            .forward => needle[1..],
++            .reverse => needle[0 .. needle.len - 1],
++        };
+ 
+         const overlap_buf = try alloc.alloc(u8, needle.len * 2);
+         errdefer alloc.free(overlap_buf);
+@@ -135,6 +154,8 @@ pub const SlidingWindow = struct {
+             .meta = meta,
+             .chunk_buf = .empty,
+             .needle = needle,
++            .pattern = pattern,
++            .match_case = match_case,
+             .direction = direction,
+             .overlap_buf = overlap_buf,
+         };
+@@ -179,12 +200,12 @@ pub const SlidingWindow = struct {
+         // An empty needle represents an inactive search. Searching for it
+         // would otherwise produce a zero-length match, which highlight()
+         // cannot represent because its end offset is inclusive.
+-        if (self.needle.len == 0) return null;
++        if (self.pattern.len == 0) return null;
+ 
+         const slices = slices: {
+             // If we have less data then the needle then we can't possibly match
+             const data_len = self.data.len();
+-            if (data_len < self.needle.len) return null;
++            if (data_len < self.pattern.len) return null;
+ 
+             break :slices self.data.getPtrSlice(
+                 self.data_offset,
+@@ -193,10 +214,10 @@ pub const SlidingWindow = struct {
+         };
+ 
+         // Search the first slice for the needle.
+-        if (std.ascii.indexOfIgnoreCase(slices[0], self.needle)) |idx| {
++        if (self.indexOf(slices[0])) |idx| {
+             return self.highlight(
+                 idx,
+-                self.needle.len,
++                self.pattern.len,
+             );
+         }
+ 
+@@ -205,12 +226,12 @@ pub const SlidingWindow = struct {
+             // Get up to needle.len - 1 bytes from each side (as much as
+             // we can) and store it in the overlap buffer.
+             const prefix: []const u8 = prefix: {
+-                const len = @min(slices[0].len, self.needle.len - 1);
++                const len = @min(slices[0].len, self.pattern.len - 1);
+                 const idx = slices[0].len - len;
+                 break :prefix slices[0][idx..];
+             };
+             const suffix: []const u8 = suffix: {
+-                const len = @min(slices[1].len, self.needle.len - 1);
++                const len = @min(slices[1].len, self.pattern.len - 1);
+                 break :suffix slices[1][0..len];
+             };
+             const overlap_len = prefix.len + suffix.len;
+@@ -219,29 +240,28 @@ pub const SlidingWindow = struct {
+             @memcpy(self.overlap_buf[prefix.len..overlap_len], suffix);
+ 
+             // Search the overlap
+-            const idx = std.ascii.indexOfIgnoreCase(
++            const idx = self.indexOf(
+                 self.overlap_buf[0..overlap_len],
+-                self.needle,
+             ) orelse break :overlap;
+ 
+             // We found a match in the overlap buffer. We need to map the
+             // index back to the data buffer in order to get our selection.
+             return self.highlight(
+                 slices[0].len - prefix.len + idx,
+-                self.needle.len,
++                self.pattern.len,
+             );
+         }
+ 
+         // Search the last slice for the needle.
+-        if (std.ascii.indexOfIgnoreCase(slices[1], self.needle)) |idx| {
++        if (self.indexOf(slices[1])) |idx| {
+             return self.highlight(
+                 slices[0].len + idx,
+-                self.needle.len,
++                self.pattern.len,
+             );
+         }
+ 
+         // Special case 1-lengthed needles to delete the entire buffer.
+-        if (self.needle.len == 1) {
++        if (self.pattern.len == 1) {
+             self.clearAndRetainCapacity();
+             self.assertIntegrity();
+             return null;
+@@ -253,7 +273,7 @@ pub const SlidingWindow = struct {
+             var meta_it = self.meta.iterator(.reverse);
+             var saved: usize = 0;
+             while (meta_it.next()) |meta| {
+-                const needed = self.needle.len - 1 - saved;
++                const needed = self.pattern.len - 1 - saved;
+                 if (meta.cell_map.items.len >= needed) {
+                     // We save up to this meta. We set our data offset
+                     // to exactly where it needs to be to continue
+@@ -267,7 +287,7 @@ pub const SlidingWindow = struct {
+                 // If we exited the while loop naturally then we
+                 // never got the amount we needed and so there is
+                 // nothing to prune.
+-                assert(saved < self.needle.len - 1);
++                assert(saved < self.pattern.len - 1);
+                 break :prune;
+             }
+ 
+@@ -293,12 +313,19 @@ pub const SlidingWindow = struct {
+ 
+         // Our data offset now moves to needle.len - 1 from the end so
+         // that we can handle the overlap case.
+-        self.data_offset = self.data.len() - self.needle.len + 1;
++        self.data_offset = self.data.len() - self.pattern.len + 1;
+ 
+         self.assertIntegrity();
+         return null;
+     }
+ 
++    /// Where the pattern first occurs in `haystack`: ASCII letters in any
++    /// case, or with `match_case` only in the same case.
++    fn indexOf(self: *const SlidingWindow, haystack: []const u8) ?usize {
++        if (self.match_case) return std.mem.indexOf(u8, haystack, self.pattern);
++        return std.ascii.indexOfIgnoreCase(haystack, self.pattern);
++    }
++
+     /// Return a flattened highlight for the given start and length.
+     ///
+     /// The flattened highlight can be used to render the highlight
+@@ -680,6 +707,8 @@ pub const SlidingWindow = struct {
+         assert(new.len == self.needle.len);
+         self.alloc.free(self.needle);
+         self.needle = self.alloc.dupe(u8, new) catch unreachable;
++        self.pattern = self.needle;
++        self.match_case = false;
+     }
+ 
+     fn assertIntegrity(self: *const SlidingWindow) void {
+@@ -823,6 +852,81 @@ test "SlidingWindow single append case insensitive ASCII" {
+     try testing.expect(w.next() == null);
+ }
+ 
++test "SlidingWindow single append match case" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    const io = testing.io;
++
++    var w: SlidingWindow = try .init(alloc, .forward, "\x01Boo!");
++    defer w.deinit();
++    try testing.expect(w.match_case);
++    try testing.expectEqualStrings("Boo!", w.pattern);
++
++    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback_bytes = 0 });
++    defer s.deinit();
++    try s.testWriteString("hello. boo! hello. Boo!");
++    _ = try w.append(s.pages.pages.first.?);
++
++    // Only the match in the same case.
++    {
++        const h = w.next().?;
++        const sel = h.untracked();
++        try testing.expectEqual(point.Point{ .active = .{
++            .x = 19,
++            .y = 0,
++        } }, s.pages.pointFromPin(.active, sel.start));
++        try testing.expectEqual(point.Point{ .active = .{
++            .x = 22,
++            .y = 0,
++        } }, s.pages.pointFromPin(.active, sel.end));
++    }
++    try testing.expect(w.next() == null);
++}
++
++test "SlidingWindow single append match case reversed" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    const io = testing.io;
++
++    var w: SlidingWindow = try .init(alloc, .reverse, "\x01Boo!");
++    defer w.deinit();
++    try testing.expectEqualStrings("!ooB", w.pattern);
++
++    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback_bytes = 0 });
++    defer s.deinit();
++    try s.testWriteString("hello. Boo! hello. boo!");
++    _ = try w.append(s.pages.pages.first.?);
++
++    {
++        const h = w.next().?;
++        const sel = h.untracked();
++        try testing.expectEqual(point.Point{ .active = .{
++            .x = 7,
++            .y = 0,
++        } }, s.pages.pointFromPin(.active, sel.start).?);
++        try testing.expectEqual(point.Point{ .active = .{
++            .x = 10,
++            .y = 0,
++        } }, s.pages.pointFromPin(.active, sel.end).?);
++    }
++    try testing.expect(w.next() == null);
++}
++
++test "SlidingWindow match case marker alone has no matches" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    const io = testing.io;
++
++    var w: SlidingWindow = try .init(alloc, .forward, "\x01");
++    defer w.deinit();
++
++    var s = try Screen.init(io, alloc, .{ .cols = 80, .rows = 24, .max_scrollback_bytes = 0 });
++    defer s.deinit();
++    try s.testWriteString("hello");
++    _ = try w.append(s.pages.pages.first.?);
++    try testing.expectEqual(null, w.next());
++}
++
+ test "SlidingWindow single append single char" {
+     const testing = std.testing;
+     const alloc = testing.allocator;

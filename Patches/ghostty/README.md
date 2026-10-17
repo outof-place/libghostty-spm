@@ -243,6 +243,14 @@ to move back.
   (`xev.Loop.timer_reset`) and left the timer running on the unfocused
   surface. Focus now resets the timer instead of a guarded run, so a cancel
   still in flight cannot leave a focused surface without one.
+- `0020-search-match-case.patch` — `terminal/search/sliding_window.zig`,
+  `terminal/search/Thread.zig`: a `search:` needle that starts with U+0001
+  (`SlidingWindow.match_case_marker`, a byte no cell holds) matches letters
+  only in the same case; any other needle stays ASCII case-insensitive. The
+  marker travels inside the needle, so every search the screen restarts
+  from its needle keeps it, and the search thread compares a marked needle
+  exactly, so changing only a letter's case searches again. Hosts with a
+  "match case" toggle send `search:\x01<text>`.
 
 Dropped once upstream carried them: `0014-free-text-signature.patch`
 (`ghostty_surface_free_text` taking the surface, upstream `4803d58b`). A

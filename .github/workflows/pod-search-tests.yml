@@ -1,0 +1,42 @@
+name: Pod Search Tests
+
+# Runs the pinned Ghostty's terminal search unit tests with the patch stack
+# applied: the tests a search patch (0020) adds or touches. Dispatch only;
+# build.yml compiles the library but runs no Zig tests.
+
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: "zig build test -Dtest-filter value"
+        required: false
+        default: "SlidingWindow"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Clone Ghostty
+        run: |
+          git clone https://github.com/ghostty-org/ghostty ./References/ghostty-upstream
+          git -C ./References/ghostty-upstream checkout "$(tr -d '[:space:]' < Ghostty.ref)"
+
+      - name: Apply Patches
+        run: ./Script/apply-patches.sh "$PWD/References/ghostty-upstream"
+
+      - name: Test
+        working-directory: References/ghostty-upstream
+        run: zig build test -Dtest-filter="${{ github.event.inputs.filter }}"
