@@ -66,8 +66,8 @@ let package = Package(
         .binaryTarget(
             name: "libghostty",
             // Pod: upstream.35a81a980bb9 plus patch 0019, macOS slice only.
-            url: "https://github.com/outof-place/libghostty-spm/releases/download/upstream.35a81a980bb9%2Bpod.1/GhosttyKit-macos.xcframework.zip",
-            checksum: "06aa7aab18a909f8d59a7405a2fcfce131518a84956fb6b3d925d12dd2ce7833"
+            url: "https://github.com/outof-place/libghostty-spm/releases/download/upstream.35a81a980bb9%2Bpod.2/GhosttyKit-macos.xcframework.zip",
+            checksum: "ee959a0b5fb9b8e165e3ebb39c16dfef6a85f6eaa34735463ced165b9a0cea42"
         ),
         .testTarget(
             name: "GhosttyKitTest",
